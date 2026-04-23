@@ -332,8 +332,8 @@ class App:
     def __init__(self, root: tk.Tk):
         self.root = root
         self.root.title(APP_TITLE)
-        self.root.geometry("920x760")
-        self.root.minsize(840, 680)
+        self.root.geometry("980x790")
+        self.root.minsize(900, 720)
 
         self.file_path = tk.StringVar()
         self.preview_rows = tk.StringVar(value=str(DEFAULT_PREVIEW_ROWS))
@@ -343,54 +343,179 @@ class App:
         self.include_formulas = tk.BooleanVar(value=True)
         self.include_vba = tk.BooleanVar(value=True)
 
+        self._configure_styles()
         self._build_ui()
         self._show_startup_notice()
 
+    def _configure_styles(self) -> None:
+        self.colors = {
+            "bg": "#F9F8FF",
+            "card": "#FFFFFF",
+            "lavender": "#DCCFFB",
+            "sky": "#D8EDFF",
+            "mint": "#DDF8EF",
+            "accent": "#8A74D8",
+            "text": "#3F3A5B",
+            "subtext": "#6E688D",
+            "entry_bg": "#F7FBFF",
+            "log_bg": "#F3F8FF",
+            "log_text": "#433E63",
+        }
+
+        style = ttk.Style()
+        self.root.configure(bg=self.colors["bg"])
+
+        style.configure(".", font=("Malgun Gothic", 10), background=self.colors["bg"], foreground=self.colors["text"])
+        style.configure("App.TFrame", background=self.colors["bg"])
+        style.configure("Card.TFrame", background=self.colors["card"], relief="flat")
+        style.configure("HeaderCard.TFrame", background=self.colors["sky"], relief="flat")
+        style.configure("PrimaryCard.TFrame", background=self.colors["mint"], relief="flat")
+        style.configure("CardTitle.TLabel", font=("Malgun Gothic", 11, "bold"), foreground=self.colors["text"], background=self.colors["card"])
+        style.configure("HeaderTitle.TLabel", font=("Malgun Gothic", 18, "bold"), foreground=self.colors["text"], background=self.colors["sky"])
+        style.configure("HeaderSub.TLabel", font=("Malgun Gothic", 10), foreground=self.colors["subtext"], background=self.colors["sky"])
+        style.configure("Field.TLabel", font=("Malgun Gothic", 10), foreground=self.colors["text"], background=self.colors["card"])
+        style.configure("Hint.TLabel", font=("Malgun Gothic", 9), foreground=self.colors["subtext"], background=self.colors["card"])
+
+        style.configure(
+            "App.TEntry",
+            padding=(10, 7),
+            fieldbackground=self.colors["entry_bg"],
+            foreground=self.colors["text"],
+            bordercolor=self.colors["lavender"],
+            lightcolor=self.colors["lavender"],
+            darkcolor=self.colors["lavender"],
+            borderwidth=1,
+            relief="flat",
+        )
+        style.map("App.TEntry", bordercolor=[("focus", self.colors["accent"])], lightcolor=[("focus", self.colors["accent"])])
+
+        style.configure(
+            "App.TButton",
+            font=("Malgun Gothic", 10, "bold"),
+            padding=(16, 10),
+            foreground=self.colors["text"],
+            background=self.colors["lavender"],
+            borderwidth=0,
+            relief="flat",
+        )
+        style.map(
+            "App.TButton",
+            background=[("active", "#CDBAF8"), ("pressed", "#C2AFF5")],
+            foreground=[("disabled", "#9F98BD")],
+        )
+        style.configure(
+            "Action.TButton",
+            font=("Malgun Gothic", 11, "bold"),
+            padding=(26, 12),
+            background=self.colors["accent"],
+            foreground="#FFFFFF",
+            borderwidth=0,
+            relief="flat",
+        )
+        style.map("Action.TButton", background=[("active", "#755FD0"), ("pressed", "#6A55C3")])
+
+        style.configure(
+            "App.TCheckbutton",
+            background=self.colors["card"],
+            foreground=self.colors["text"],
+            font=("Malgun Gothic", 10),
+        )
+        style.map("App.TCheckbutton", background=[("active", self.colors["card"])], foreground=[("active", self.colors["text"])])
+
     def _build_ui(self) -> None:
-        outer = ttk.Frame(self.root, padding=14)
+        outer = ttk.Frame(self.root, padding=18, style="App.TFrame")
         outer.pack(fill="both", expand=True)
 
-        ttk.Label(outer, text="엑셀 구조 추출기", font=("Malgun Gothic", 16, "bold")).pack(anchor="w")
+        header_card = ttk.Frame(outer, style="HeaderCard.TFrame", padding=(18, 16))
+        header_card.pack(fill="x", pady=(0, 10))
+        ttk.Label(header_card, text="엑셀 구조 추출기", style="HeaderTitle.TLabel").pack(anchor="w")
         ttk.Label(
-            outer,
+            header_card,
             text="원본 파일을 읽어 시트 구조/헤더/수식/VBA(선택)를 보고서로 저장합니다.",
-        ).pack(anchor="w", pady=(4, 12))
+            style="HeaderSub.TLabel",
+        ).pack(anchor="w", pady=(6, 2))
 
-        file_box = ttk.LabelFrame(outer, text="1) 파일 선택", padding=10)
-        file_box.pack(fill="x", pady=6)
-
-        ttk.Entry(file_box, textvariable=self.file_path).grid(row=0, column=0, sticky="ew", padx=(0, 8))
-        ttk.Button(file_box, text="엑셀 파일 열기", command=self.choose_file).grid(row=0, column=1)
-        file_box.columnconfigure(0, weight=1)
-
-        option_box = ttk.LabelFrame(outer, text="2) 추출 옵션", padding=10)
-        option_box.pack(fill="x", pady=6)
-
-        ttk.Label(option_box, text="미리보기 행 수").grid(row=0, column=0, sticky="w")
-        ttk.Entry(option_box, textvariable=self.preview_rows, width=10).grid(row=0, column=1, sticky="w", padx=(6, 14))
-        ttk.Label(option_box, text="헤더 스캔 행 수").grid(row=0, column=2, sticky="w")
-        ttk.Entry(option_box, textvariable=self.header_scan_rows, width=10).grid(row=0, column=3, sticky="w", padx=(6, 14))
-        ttk.Label(option_box, text="최대 열 수").grid(row=0, column=4, sticky="w")
-        ttk.Entry(option_box, textvariable=self.max_cols, width=10).grid(row=0, column=5, sticky="w", padx=(6, 0))
-
-        ttk.Checkbutton(option_box, text="미리보기 값 마스킹", variable=self.mask_preview).grid(
-            row=1, column=0, sticky="w", pady=(10, 0)
+        file_card = ttk.Frame(outer, style="Card.TFrame", padding=(16, 14))
+        file_card.pack(fill="x", pady=6)
+        ttk.Label(file_card, text="1) 파일 선택", style="CardTitle.TLabel").grid(
+            row=0, column=0, columnspan=3, sticky="w", pady=(0, 10)
         )
-        ttk.Checkbutton(option_box, text="수식 샘플 포함", variable=self.include_formulas).grid(
-            row=1, column=1, columnspan=2, sticky="w", pady=(10, 0)
+        ttk.Entry(file_card, textvariable=self.file_path, style="App.TEntry").grid(
+            row=1, column=0, sticky="ew", padx=(0, 10)
         )
-        ttk.Checkbutton(option_box, text="VBA 모듈 추출 시도", variable=self.include_vba).grid(
-            row=1, column=3, columnspan=3, sticky="w", pady=(10, 0)
+        ttk.Button(file_card, text="엑셀 파일 열기", command=self.choose_file, style="App.TButton").grid(row=1, column=1)
+        ttk.Label(
+            file_card,
+            text="xlsx, xlsm 파일을 선택하세요.",
+            style="Hint.TLabel",
+        ).grid(row=2, column=0, columnspan=2, sticky="w", pady=(8, 0))
+        file_card.columnconfigure(0, weight=1)
+
+        option_card = ttk.Frame(outer, style="Card.TFrame", padding=(16, 14))
+        option_card.pack(fill="x", pady=6)
+        ttk.Label(option_card, text="2) 추출 옵션", style="CardTitle.TLabel").grid(
+            row=0, column=0, columnspan=6, sticky="w", pady=(0, 10)
         )
 
-        btn_box = ttk.Frame(outer)
-        btn_box.pack(fill="x", pady=(10, 8))
-        ttk.Button(btn_box, text="보고서 생성", command=self.run_extract).pack(side="left")
-        ttk.Button(btn_box, text="로그 지우기", command=self.clear_log).pack(side="left", padx=(8, 0))
+        ttk.Label(option_card, text="미리보기 행 수", style="Field.TLabel").grid(row=1, column=0, sticky="w")
+        ttk.Entry(option_card, textvariable=self.preview_rows, width=10, style="App.TEntry").grid(
+            row=1, column=1, sticky="w", padx=(8, 18)
+        )
+        ttk.Label(option_card, text="헤더 스캔 행 수", style="Field.TLabel").grid(row=1, column=2, sticky="w")
+        ttk.Entry(option_card, textvariable=self.header_scan_rows, width=10, style="App.TEntry").grid(
+            row=1, column=3, sticky="w", padx=(8, 18)
+        )
+        ttk.Label(option_card, text="최대 열 수", style="Field.TLabel").grid(row=1, column=4, sticky="w")
+        ttk.Entry(option_card, textvariable=self.max_cols, width=10, style="App.TEntry").grid(
+            row=1, column=5, sticky="w", padx=(8, 0)
+        )
 
-        log_box = ttk.LabelFrame(outer, text="3) 진행 로그", padding=10)
-        log_box.pack(fill="both", expand=True, pady=6)
-        self.log_text = tk.Text(log_box, height=24, font=("Consolas", 10), wrap="word")
+        ttk.Checkbutton(
+            option_card,
+            text="미리보기 값 마스킹",
+            variable=self.mask_preview,
+            style="App.TCheckbutton",
+        ).grid(row=2, column=0, columnspan=2, sticky="w", pady=(12, 0))
+        ttk.Checkbutton(
+            option_card,
+            text="수식 샘플 포함",
+            variable=self.include_formulas,
+            style="App.TCheckbutton",
+        ).grid(row=2, column=2, columnspan=2, sticky="w", pady=(12, 0))
+        ttk.Checkbutton(
+            option_card,
+            text="VBA 모듈 추출 시도",
+            variable=self.include_vba,
+            style="App.TCheckbutton",
+        ).grid(row=2, column=4, columnspan=2, sticky="w", pady=(12, 0))
+
+        action_card = ttk.Frame(outer, style="PrimaryCard.TFrame", padding=(16, 14))
+        action_card.pack(fill="x", pady=6)
+        ttk.Label(action_card, text="3) 실행", style="CardTitle.TLabel").pack(anchor="w", pady=(0, 10))
+        btn_box = ttk.Frame(action_card, style="PrimaryCard.TFrame")
+        btn_box.pack(fill="x")
+        ttk.Button(btn_box, text="보고서 생성", command=self.run_extract, style="Action.TButton").pack(side="left")
+        ttk.Button(btn_box, text="로그 지우기", command=self.clear_log, style="App.TButton").pack(side="left", padx=(10, 0))
+
+        log_card = ttk.Frame(outer, style="Card.TFrame", padding=(16, 14))
+        log_card.pack(fill="both", expand=True, pady=6)
+        ttk.Label(log_card, text="4) 진행 로그", style="CardTitle.TLabel").pack(anchor="w", pady=(0, 10))
+        self.log_text = tk.Text(
+            log_card,
+            height=24,
+            font=("Consolas", 10),
+            wrap="word",
+            bg=self.colors["log_bg"],
+            fg=self.colors["log_text"],
+            insertbackground=self.colors["accent"],
+            relief="flat",
+            bd=0,
+            padx=12,
+            pady=10,
+            highlightthickness=1,
+            highlightbackground=self.colors["lavender"],
+            highlightcolor=self.colors["accent"],
+        )
         self.log_text.pack(fill="both", expand=True)
 
     def _show_startup_notice(self) -> None:
