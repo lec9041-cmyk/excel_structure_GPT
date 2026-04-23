@@ -1,20 +1,45 @@
+# -*- coding: utf-8 -*-
+"""
+Excel 구조 추출기 (Python 3.10+)
 
-import re
+필수 패키지:
+- openpyxl
+
+선택 패키지:
+- xlwings (VBA 모듈 추출용, 없어도 기본 기능 동작)
+
+실행:
+- python excel_structure_extractor.py
+"""
+
+from __future__ import annotations
+
 import json
+import re
+import sys
 import traceback
-import tkinter as tk
-from tkinter import filedialog, messagebox, ttk
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Optional
 
-from openpyxl import load_workbook
+# tkinter가 없는 환경에서도 즉시 크래시하지 않도록 보호
+try:
+    import tkinter as tk
+    from tkinter import filedialog, messagebox, ttk
+except Exception as _tk_error:  # noqa: N816
+    tk = None
+    filedialog = None
+    messagebox = None
+    ttk = None
+    _TK_IMPORT_ERROR = _tk_error
+else:
+    _TK_IMPORT_ERROR = None
 
+# xlwings는 선택 의존성
 try:
     import xlwings as xw
 except Exception:
     xw = None
-
 
 APP_TITLE = "엑셀 구조 추출기"
 DEFAULT_PREVIEW_ROWS = 10
@@ -23,27 +48,23 @@ DEFAULT_MAX_COLS = 30
 
 
 def safe_str(value: Any) -> str:
-    if value is None:
-        return ""
-    return str(value)
+    return "" if value is None else str(value)
 
 
 def mask_value(value: Any) -> str:
     text = safe_str(value)
-    if text == "":
+    if not text:
         return ""
 
-    text = re.sub(r'([A-Za-z0-9._%+-]+)@([A-Za-z0-9.-]+\.[A-Za-z]{2,})', '[EMAIL]', text)
-    text = re.sub(r'\b[A-Z]{1,5}[-/]?\d{3,}\b', '[CODE]', text)
-    text = re.sub(r'\b\d{4,}\b', '[NUM]', text)
-    text = re.sub(r'(?<!\w)([\$₩¥€]?\s?\d{1,3}(?:,\d{3})+(?:\.\d+)?)', '[AMOUNT]', text)
-    text = re.sub(r'(?<!\w)(\d+\.\d+)', '[NUMBER]', text)
-    text = re.sub(r'\b\d{4}[-/.]\d{1,2}[-/.]\d{1,2}\b', '[DATE]', text)
-    text = re.sub(r'\b\d{1,2}[-/.]\d{1,2}[-/.]\d{2,4}\b', '[DATE]', text)
+    text = re.sub(r"([A-Za-z0-9._%+-]+)@([A-Za-z0-9.-]+\.[A-Za-z]{2,})", "[EMAIL]", text)
+    text = re.sub(r"\b[A-Z]{1,5}[-/]?\d{3,}\b", "[CODE]", text)
+    text = re.sub(r"\b\d{4,}\b", "[NUM]", text)
+    text = re.sub(r"(?<!\w)([\$₩¥€]?\s?\d{1,3}(?:,\d{3})+(?:\.\d+)?)", "[AMOUNT]", text)
+    text = re.sub(r"(?<!\w)(\d+\.\d+)", "[NUMBER]", text)
+    text = re.sub(r"\b\d{4}[-/.]\d{1,2}[-/.]\d{1,2}\b", "[DATE]", text)
+    text = re.sub(r"\b\d{1,2}[-/.]\d{1,2}[-/.]\d{2,4}\b", "[DATE]", text)
 
-    if len(text) > 24:
-        return text[:10] + "..." + text[-6:]
-    return text
+    return text[:10] + "..." + text[-6:] if len(text) > 24 else text
 
 
 def col_letter(n: int) -> str:
@@ -51,10 +72,10 @@ def col_letter(n: int) -> str:
     while n:
         n, rem = divmod(n - 1, 26)
         result = chr(65 + rem) + result
-    return result
+    return result or "A"
 
 
-def detect_non_empty_range(ws, max_cols: int = DEFAULT_MAX_COLS) -> Tuple[int, int]:
+def detect_non_empty_range(ws: Any, max_cols: int = DEFAULT_MAX_COLS) -> tuple[int, int]:
     max_row = ws.max_row or 1
     max_col = min(ws.max_column or 1, max_cols)
 
@@ -86,28 +107,32 @@ def detect_non_empty_range(ws, max_cols: int = DEFAULT_MAX_COLS) -> Tuple[int, i
     return last_non_empty_row, last_non_empty_col
 
 
-def preview_sheet(ws, preview_rows: int, max_cols: int, mask: bool) -> List[Dict[str, Any]]:
-    rows = []
+def preview_sheet(ws: Any, preview_rows: int, max_cols: int, mask: bool) -> list[dict[str, str]]:
+    rows: list[dict[str, str]] = []
     max_r = min(ws.max_row or 1, preview_rows)
     max_c = min(ws.max_column or 1, max_cols)
 
     for r in range(1, max_r + 1):
-        row_data = {}
+        row_data: dict[str, str] = {}
         for c in range(1, max_c + 1):
             cell_ref = f"{col_letter(c)}{r}"
             value = ws.cell(r, c).value
             text = safe_str(value)
-            if mask:
-                text = mask_value(text)
-            row_data[cell_ref] = text
+            row_data[cell_ref] = mask_value(text) if mask else text
         rows.append(row_data)
     return rows
 
 
-def find_formula_samples(ws, max_rows: int = 200, max_cols: int = DEFAULT_MAX_COLS, limit: int = 20) -> List[str]:
-    samples = []
+def find_formula_samples(
+    ws: Any,
+    max_rows: int = 200,
+    max_cols: int = DEFAULT_MAX_COLS,
+    limit: int = 20,
+) -> list[str]:
+    samples: list[str] = []
     mr = min(ws.max_row or 1, max_rows)
     mc = min(ws.max_column or 1, max_cols)
+
     for r in range(1, mr + 1):
         for c in range(1, mc + 1):
             v = ws.cell(r, c).value
@@ -125,11 +150,19 @@ def summarize_workbook(
     max_cols: int = DEFAULT_MAX_COLS,
     mask_preview: bool = True,
     include_formulas: bool = True,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
+    # openpyxl import를 함수 내부로 옮겨 앱 시작 단계 크래시 방지
+    try:
+        from openpyxl import load_workbook
+    except Exception as exc:  # pragma: no cover
+        raise RuntimeError(
+            "openpyxl을 불러올 수 없습니다. 'pip install openpyxl' 후 다시 실행하세요."
+        ) from exc
+
     wb = load_workbook(file_path, data_only=False, keep_vba=True)
     data_wb = load_workbook(file_path, data_only=True, keep_vba=True)
 
-    result: Dict[str, Any] = {
+    result: dict[str, Any] = {
         "file_name": Path(file_path).name,
         "generated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         "sheets": [],
@@ -141,39 +174,45 @@ def summarize_workbook(
             dn = getattr(wb, "defined_names", None)
             if dn is not None and hasattr(dn, "definedName"):
                 for item in dn.definedName:
-                    result["defined_names"].append({
-                        "name": getattr(item, "name", ""),
-                        "value": getattr(item, "attr_text", "") or safe_str(item),
-                    })
+                    result["defined_names"].append(
+                        {
+                            "name": getattr(item, "name", ""),
+                            "value": getattr(item, "attr_text", "") or safe_str(item),
+                        }
+                    )
         except Exception:
             pass
 
         for ws, ws_data in zip(wb.worksheets, data_wb.worksheets):
             last_row, last_col = detect_non_empty_range(ws, max_cols=max_cols)
 
-            header_rows = []
+            header_rows: list[list[str]] = []
             for r in range(1, min(header_scan_rows, ws.max_row or 1) + 1):
-                row_items = []
+                row_items: list[str] = []
                 for c in range(1, min(ws.max_column or 1, max_cols) + 1):
                     v = ws.cell(r, c).value
                     text = safe_str(v)
-                    if mask_preview:
-                        text = mask_value(text)
-                    row_items.append(f"{col_letter(c)}{r}={text}")
+                    row_items.append(f"{col_letter(c)}{r}={mask_value(text) if mask_preview else text}")
                 header_rows.append(row_items)
 
             preview = preview_sheet(ws_data, preview_rows=preview_rows, max_cols=max_cols, mask=mask_preview)
-            formulas = find_formula_samples(ws, max_rows=200, max_cols=max_cols, limit=20) if include_formulas else []
+            formulas = (
+                find_formula_samples(ws, max_rows=200, max_cols=max_cols, limit=20)
+                if include_formulas
+                else []
+            )
 
-            result["sheets"].append({
-                "sheet_name": ws.title,
-                "max_row": ws.max_row,
-                "max_column": ws.max_column,
-                "estimated_used_range": f"A1:{col_letter(last_col)}{last_row}",
-                "header_scan": header_rows,
-                "preview_rows": preview,
-                "formula_samples": formulas,
-            })
+            result["sheets"].append(
+                {
+                    "sheet_name": ws.title,
+                    "max_row": ws.max_row,
+                    "max_column": ws.max_column,
+                    "estimated_used_range": f"A1:{col_letter(last_col)}{last_row}",
+                    "header_scan": header_rows,
+                    "preview_rows": preview,
+                    "formula_samples": formulas,
+                }
+            )
     finally:
         wb.close()
         data_wb.close()
@@ -181,13 +220,13 @@ def summarize_workbook(
     return result
 
 
-def export_vba_modules_via_xlwings(file_path: str) -> Dict[str, Any]:
+def export_vba_modules_via_xlwings(file_path: str) -> dict[str, Any]:
     if xw is None:
         return {"success": False, "reason": "xlwings 미설치", "modules": []}
 
     app = None
     book = None
-    modules = []
+    modules: list[dict[str, Any]] = []
 
     try:
         app = xw.App(visible=False, add_book=False)
@@ -205,16 +244,18 @@ def export_vba_modules_via_xlwings(file_path: str) -> Dict[str, Any]:
             line_count = code_module.CountOfLines
             code_text = code_module.Lines(1, line_count) if line_count > 0 else ""
 
-            modules.append({
-                "name": comp.Name,
-                "type": comp.Type,
-                "line_count": line_count,
-                "code": code_text,
-            })
+            modules.append(
+                {
+                    "name": comp.Name,
+                    "type": comp.Type,
+                    "line_count": line_count,
+                    "code": code_text,
+                }
+            )
 
         return {"success": True, "reason": "", "modules": modules}
-    except Exception as e:
-        return {"success": False, "reason": f"{type(e).__name__}: {e}", "modules": []}
+    except Exception as exc:
+        return {"success": False, "reason": f"{type(exc).__name__}: {exc}", "modules": []}
     finally:
         try:
             if book is not None:
@@ -228,8 +269,8 @@ def export_vba_modules_via_xlwings(file_path: str) -> Dict[str, Any]:
             pass
 
 
-def render_report_text(summary: Dict[str, Any], vba_info: Optional[Dict[str, Any]]) -> str:
-    lines: List[str] = []
+def render_report_text(summary: dict[str, Any], vba_info: Optional[dict[str, Any]]) -> str:
+    lines: list[str] = []
     lines.append("# 엑셀 구조 추출 보고서")
     lines.append("")
     lines.append(f"- 파일명: {summary.get('file_name', '')}")
@@ -249,6 +290,7 @@ def render_report_text(summary: Dict[str, Any], vba_info: Optional[Dict[str, Any
         lines.append(f"- 크기: {sheet['max_row']}행 x {sheet['max_column']}열")
         lines.append(f"- 추정 사용범위: {sheet['estimated_used_range']}")
         lines.append("")
+
         lines.append("#### 헤더 스캔")
         for row in sheet["header_scan"]:
             lines.append("- " + " | ".join(row))
@@ -270,15 +312,17 @@ def render_report_text(summary: Dict[str, Any], vba_info: Optional[Dict[str, Any
         lines.append("## VBA 모듈")
         if vba_info.get("success"):
             for module in vba_info.get("modules", []):
-                lines.append(f"### 모듈명: {module['name']} / 타입: {module['type']} / 줄수: {module['line_count']}")
+                lines.append(
+                    f"### 모듈명: {module['name']} / 타입: {module['type']} / 줄수: {module['line_count']}"
+                )
                 lines.append("```vb")
                 lines.append(module["code"][:50000])
                 lines.append("```")
                 lines.append("")
         else:
             lines.append(f"- VBA 추출 실패: {vba_info.get('reason', '')}")
-            lines.append("- 필요 시 Excel 옵션에서 'VBA 프로젝트 개체 모델에 대한 신뢰할 수 있는 액세스' 허용 확인")
-            lines.append("- xlwings 설치 여부와 Windows Excel 환경 확인")
+            lines.append("- xlwings 미설치/미지원 환경이어도 시트 구조 추출은 계속 진행됩니다.")
+            lines.append("- Windows + Excel 설치 + 보안 설정(신뢰할 수 있는 VBA 접근) 확인 권장")
             lines.append("")
 
     return "\n".join(lines)
@@ -300,15 +344,16 @@ class App:
         self.include_vba = tk.BooleanVar(value=True)
 
         self._build_ui()
+        self._show_startup_notice()
 
-    def _build_ui(self):
+    def _build_ui(self) -> None:
         outer = ttk.Frame(self.root, padding=14)
         outer.pack(fill="both", expand=True)
 
         ttk.Label(outer, text="엑셀 구조 추출기", font=("Malgun Gothic", 16, "bold")).pack(anchor="w")
         ttk.Label(
             outer,
-            text="원본 파일은 네 PC에서만 읽고, 시트 구조/헤더/수식/VBA 코드(선택)를 텍스트 보고서로 저장",
+            text="원본 파일을 읽어 시트 구조/헤더/수식/VBA(선택)를 보고서로 저장합니다.",
         ).pack(anchor="w", pady=(4, 12))
 
         file_box = ttk.LabelFrame(outer, text="1) 파일 선택", padding=10)
@@ -328,9 +373,15 @@ class App:
         ttk.Label(option_box, text="최대 열 수").grid(row=0, column=4, sticky="w")
         ttk.Entry(option_box, textvariable=self.max_cols, width=10).grid(row=0, column=5, sticky="w", padx=(6, 0))
 
-        ttk.Checkbutton(option_box, text="미리보기 값 마스킹", variable=self.mask_preview).grid(row=1, column=0, sticky="w", pady=(10, 0))
-        ttk.Checkbutton(option_box, text="수식 샘플 포함", variable=self.include_formulas).grid(row=1, column=1, columnspan=2, sticky="w", pady=(10, 0))
-        ttk.Checkbutton(option_box, text="VBA 모듈 추출 시도", variable=self.include_vba).grid(row=1, column=3, columnspan=3, sticky="w", pady=(10, 0))
+        ttk.Checkbutton(option_box, text="미리보기 값 마스킹", variable=self.mask_preview).grid(
+            row=1, column=0, sticky="w", pady=(10, 0)
+        )
+        ttk.Checkbutton(option_box, text="수식 샘플 포함", variable=self.include_formulas).grid(
+            row=1, column=1, columnspan=2, sticky="w", pady=(10, 0)
+        )
+        ttk.Checkbutton(option_box, text="VBA 모듈 추출 시도", variable=self.include_vba).grid(
+            row=1, column=3, columnspan=3, sticky="w", pady=(10, 0)
+        )
 
         btn_box = ttk.Frame(outer)
         btn_box.pack(fill="x", pady=(10, 8))
@@ -339,48 +390,45 @@ class App:
 
         log_box = ttk.LabelFrame(outer, text="3) 진행 로그", padding=10)
         log_box.pack(fill="both", expand=True, pady=6)
-
         self.log_text = tk.Text(log_box, height=24, font=("Consolas", 10), wrap="word")
         self.log_text.pack(fill="both", expand=True)
 
-        help_text = (
-            "사용법:\n"
-            "1. .xlsx 또는 .xlsm 파일 선택\n"
-            "2. 보고서 생성 클릭\n"
-            "3. 저장된 txt/md 파일 내용을 복사해서 ChatGPT에 붙여넣기\n\n"
-            "참고:\n"
-            "- VBA 추출은 Windows Excel 환경에서만 잘 동작하는 편\n"
-            "- 실패해도 시트 구조 추출은 계속 진행됨\n"
-            "- 민감정보가 걱정되면 '미리보기 값 마스킹' 유지 권장"
-        )
-        ttk.Label(outer, text=help_text, justify="left").pack(anchor="w", pady=(10, 0))
+    def _show_startup_notice(self) -> None:
+        self.log("프로그램 시작 완료")
+        self.log("필수: openpyxl / 선택: xlwings")
+        if xw is None:
+            self.log("[경고] xlwings를 찾지 못했습니다. VBA 추출 없이 계속 진행합니다.")
 
-    def log(self, text: str):
+    def log(self, text: str) -> None:
         self.log_text.insert("end", text + "\n")
         self.log_text.see("end")
         self.root.update_idletasks()
 
-    def clear_log(self):
+    def clear_log(self) -> None:
         self.log_text.delete("1.0", "end")
 
-    def choose_file(self):
+    def choose_file(self) -> None:
         path = filedialog.askopenfilename(
             title="엑셀 파일 선택",
-            filetypes=[("Excel files", "*.xlsx *.xlsm"), ("All files", "*.*")]
+            filetypes=[("Excel files", "*.xlsx *.xlsm"), ("All files", "*.*")],
         )
         if path:
             self.file_path.set(path)
             self.log(f"파일 선택: {path}")
 
-    def run_extract(self):
+    def run_extract(self) -> None:
         try:
             file_path = self.file_path.get().strip()
             if not file_path:
                 raise ValueError("엑셀 파일을 선택하세요.")
+            if not Path(file_path).exists():
+                raise FileNotFoundError(f"파일을 찾을 수 없습니다: {file_path}")
 
             preview_rows = int(self.preview_rows.get().strip())
             header_scan_rows = int(self.header_scan_rows.get().strip())
             max_cols = int(self.max_cols.get().strip())
+            if preview_rows <= 0 or header_scan_rows <= 0 or max_cols <= 0:
+                raise ValueError("옵션 값은 1 이상의 정수여야 합니다.")
 
             self.log("시트 구조 추출 시작...")
             summary = summarize_workbook(
@@ -400,7 +448,7 @@ class App:
                 if vba_info.get("success"):
                     self.log(f"VBA 추출 완료: {len(vba_info.get('modules', []))}개 모듈")
                 else:
-                    self.log(f"VBA 추출 실패: {vba_info.get('reason', '')}")
+                    self.log(f"[경고] VBA 추출 실패: {vba_info.get('reason', '')}")
 
             report_text = render_report_text(summary, vba_info)
 
@@ -412,36 +460,57 @@ class App:
 
             txt_path.write_text(report_text, encoding="utf-8")
             md_path.write_text(report_text, encoding="utf-8")
-            json_path.write_text(json.dumps({"summary": summary, "vba_info": vba_info}, ensure_ascii=False, indent=2), encoding="utf-8")
+            json_path.write_text(
+                json.dumps({"summary": summary, "vba_info": vba_info}, ensure_ascii=False, indent=2),
+                encoding="utf-8",
+            )
 
             self.log(f"저장 완료: {txt_path}")
             self.log(f"저장 완료: {md_path}")
             self.log(f"저장 완료: {json_path}")
-
-            messagebox.showinfo(
-                APP_TITLE,
-                "보고서 생성 완료\n\n"
-                f"TXT: {txt_path}\n"
-                f"MD: {md_path}\n"
-                f"JSON: {json_path}"
-            )
-        except Exception as e:
+            messagebox.showinfo(APP_TITLE, f"보고서 생성 완료\n\nTXT: {txt_path}\nMD: {md_path}\nJSON: {json_path}")
+        except Exception as exc:
             self.log("[오류]")
-            self.log(str(e))
+            self.log(str(exc))
             self.log(traceback.format_exc())
-            messagebox.showerror(APP_TITLE, f"오류 발생\n\n{e}")
+            try:
+                messagebox.showerror(APP_TITLE, f"오류 발생\n\n{exc}")
+            except Exception:
+                pass
 
 
-def main():
-    root = tk.Tk()
-    style = ttk.Style()
+def main() -> int:
+    # 1) tkinter 문제를 친절히 안내하고 종료
+    if tk is None or ttk is None or filedialog is None or messagebox is None:
+        print("[치명적] tkinter를 불러올 수 없어 GUI를 시작할 수 없습니다.")
+        print(f"원인: {_TK_IMPORT_ERROR}")
+        print("해결: Windows 기본 Python 또는 tkinter 포함된 Python 배포판을 사용하세요.")
+        return 1
+
+    # 2) 루트 생성 단계 오류 보호 (디스플레이/권한/환경 문제 등)
     try:
-        style.theme_use("clam")
-    except Exception:
-        pass
-    App(root)
-    root.mainloop()
+        root = tk.Tk()
+    except Exception as exc:
+        print("[치명적] GUI 창 생성 실패")
+        print(f"원인: {type(exc).__name__}: {exc}")
+        return 1
+
+    try:
+        style = ttk.Style()
+        try:
+            style.theme_use("clam")
+        except Exception:
+            pass
+
+        App(root)
+        root.mainloop()
+        return 0
+    except Exception as exc:
+        print("[치명적] 프로그램 초기화 실패")
+        print(f"원인: {type(exc).__name__}: {exc}")
+        print(traceback.format_exc())
+        return 1
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())
